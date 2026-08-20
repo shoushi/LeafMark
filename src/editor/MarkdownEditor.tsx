@@ -69,6 +69,30 @@ function markdownToHtml(source: string): string {
   return sanitizeHtml(typeof html === 'string' ? html : '')
 }
 
+function isLocalImageReference(reference: string): boolean {
+  const value = reference.trim()
+  return Boolean(value)
+    && !value.startsWith('/')
+    && !value.startsWith('\\')
+    && !value.startsWith('#')
+    && !/^[a-z][a-z\d+.-]*:/i.test(value)
+}
+
+async function hydrateLocalImages(container: HTMLElement, markdownPath: string): Promise<void> {
+  const images = Array.from(container.querySelectorAll('img'))
+  await Promise.all(images.map(async (image) => {
+    const reference = image.dataset.markdownSrc ?? image.getAttribute('src') ?? ''
+    if (!isLocalImageReference(reference)) return
+    image.dataset.markdownSrc = reference
+    try {
+      image.src = await window.markdownDesktop.loadLocalImage(markdownPath, reference)
+      image.removeAttribute('data-image-error')
+    } catch {
+      image.dataset.imageError = 'true'
+    }
+  }))
+}
+
 function inlineMarkdown(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) {
     return (node.textContent ?? '').replace(/\u00a0/g, ' ')
@@ -233,6 +257,7 @@ export function MarkdownEditor({
 }: MarkdownEditorProps): React.ReactElement {
   const editableRef = useRef<HTMLDivElement>(null)
   const sourceRef = useRef<HTMLTextAreaElement>(null)
+  const readerRef = useRef<HTMLElement>(null)
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
@@ -271,6 +296,13 @@ export function MarkdownEditor({
       editableRef.current.dataset.markdownValue = value
     }
   }, [html, mode, value])
+
+  useEffect(() => {
+    if (!filePath) return
+    const container = mode === 'wysiwyg' ? editableRef.current : mode === 'reader' ? readerRef.current : null
+    if (!container) return
+    void hydrateLocalImages(container, filePath)
+  }, [filePath, html, mode])
 
   useEffect(() => {
     if (mode === 'source') sourceRef.current?.focus()
@@ -539,7 +571,7 @@ export function MarkdownEditor({
           />
         )}
         {mode === 'reader' && (
-          <article className="markdown-editor__reader" dangerouslySetInnerHTML={{ __html: html }} />
+          <article ref={readerRef} className="markdown-editor__reader" dangerouslySetInnerHTML={{ __html: html }} />
         )}
       </div>
 

@@ -186,6 +186,8 @@ export interface MarkdownDesktopAPI {
   restoreSnapshot(path: string, snapshotId: string): Promise<SavedFileResult>
   mergeFile(path: string, baseContent: string, localContent: string): Promise<MergeFileResult>
   saveAttachment(options: SaveAttachmentOptions): Promise<SavedAttachmentResult>
+  /** Resolve a workspace-relative image reference for safe display in the renderer. */
+  loadLocalImage(markdownPath: string, reference: string): Promise<string>
   exportDocument(options: ExportDocumentOptions): Promise<ExportDocumentResult | null>
   createFile(options: CreateFileOptions): Promise<MarkdownFileInfo>
   createDirectory(options: CreateDirectoryOptions): Promise<{ path: string; name: string }>

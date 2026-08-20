@@ -45,6 +45,7 @@ const CHANNELS = {
   restoreSnapshot: 'history:restore-snapshot',
   mergeFile: 'file:merge',
   saveAttachment: 'file:save-attachment',
+  loadLocalImage: 'file:load-local-image',
   exportDocument: 'file:export-document',
   createFile: 'file:create',
   createDirectory: 'directory:create',
@@ -601,6 +602,34 @@ async function saveAttachment(options: SaveAttachmentOptions): Promise<SavedAtta
   throw new Error('Could not choose a unique attachment name')
 }
 
+async function loadLocalImage(markdownPathValue: string, referenceValue: string): Promise<string> {
+  const documentPath = await assertExisting(markdownPathValue)
+  if (!markdownPath(documentPath) || !(await fs.stat(documentPath)).isFile()) {
+    throw new Error('A Markdown document is required to resolve an image')
+  }
+
+  const reference = String(referenceValue || '').trim()
+  if (!reference || reference.startsWith('/') || reference.startsWith('\\') || /^[a-z][a-z\d+.-]*:/i.test(reference)) {
+    throw new Error('Only relative workspace image references are allowed')
+  }
+  const encodedPath = reference.split(/[?#]/, 1)[0]
+  let decodedPath: string
+  try {
+    decodedPath = decodeURIComponent(encodedPath)
+  } catch {
+    throw new Error('Invalid image reference')
+  }
+  if (!decodedPath || path.isAbsolute(decodedPath)) throw new Error('Invalid image reference')
+
+  const target = await assertExisting(path.resolve(path.dirname(documentPath), decodedPath.replaceAll('/', path.sep)))
+  const stat = await fs.stat(target)
+  if (!stat.isFile()) throw new Error('The image reference is not a file')
+  if (stat.size > MAX_ATTACHMENT_BYTES) throw new Error('Images larger than 25 MB cannot be previewed')
+  const { mimeType } = attachmentMimeType(target)
+  const bytes = await fs.readFile(target)
+  return `data:${mimeType};base64,${bytes.toString('base64')}`
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => {
     switch (character) {
@@ -901,6 +930,12 @@ function registerIpc(): void {
     if (request.name !== undefined && typeof request.name !== 'string') throw new Error('Invalid attachment name')
     if (request.mimeType !== undefined && typeof request.mimeType !== 'string') throw new Error('Invalid attachment MIME type')
     return saveAttachment(request as SaveAttachmentOptions)
+  })
+  ipcMain.handle(CHANNELS.loadLocalImage, (_event, markdownPathValue: unknown, referenceValue: unknown) => {
+    if (typeof markdownPathValue !== 'string' || typeof referenceValue !== 'string') {
+      throw new Error('Invalid local image request')
+    }
+    return loadLocalImage(markdownPathValue, referenceValue)
   })
   ipcMain.handle(CHANNELS.exportDocument, (_event, options: unknown) => {
     if (!options || typeof options !== 'object') throw new Error('Invalid export request')
