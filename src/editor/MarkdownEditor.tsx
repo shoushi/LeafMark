@@ -1,0 +1,361 @@
+import React, {
+  type KeyboardEvent,
+  type MutableRefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+import './editor.css'
+
+export type MarkdownEditorMode = 'wysiwyg' | 'source' | 'reader'
+
+export type MarkdownEditorCommand =
+  | { type: 'find'; query?: string }
+  | { type: 'replace-all'; query: string; replacement: string }
+  | { type: 'save' }
+  | { type: 'focus' }
+
+export interface MarkdownEditorProps {
+  /** The Markdown document. The component is intentionally controlled. */
+  value: string
+  onChange: (value: string) => void
+  mode: MarkdownEditorMode
+  onModeChange: (mode: MarkdownEditorMode) => void
+  filePath?: string
+  onSave?: () => void | Promise<void>
+  onCommand?: (command: MarkdownEditorCommand) => void
+  readOnly?: boolean
+  placeholder?: string
+  className?: string
+}
+
+const SAFE_URI = /^(?:(?:https?|mailto|tel|asset|blob):|(?:\.?\.?\/|#)|data:image\/(?:png|gif|jpe?g|webp|svg\+xml);)/i
+
+function sanitizeHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    ALLOWED_URI_REGEXP: SAFE_URI,
+    ADD_ATTR: ['target', 'rel'],
+  })
+}
+
+function markdownToHtml(source: string): string {
+  const html = marked.parse(source, { gfm: true, breaks: false })
+  return sanitizeHtml(typeof html === 'string' ? html : '')
+}
+
+function inlineMarkdown(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return (node.textContent ?? '').replace(/\u00a0/g, ' ')
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return ''
+
+  const element = node as HTMLElement
+  const tag = element.tagName.toLowerCase()
+  const content = Array.from(element.childNodes).map(inlineMarkdown).join('')
+
+  switch (tag) {
+    case 'br':
+      return '\n'
+    case 'strong':
+    case 'b':
+      return `**${content}**`
+    case 'em':
+    case 'i':
+      return `*${content}*`
+    case 'del':
+    case 's':
+      return `~~${content}~~`
+    case 'code':
+      return `\`${content.replace(/`/g, '\\`')}\``
+    case 'a': {
+      const href = element.getAttribute('href') ?? ''
+      return href ? `[${content}](${href.replace(/\)/g, '\\)')})` : content
+    }
+    case 'img': {
+      const src = element.getAttribute('src') ?? ''
+      const alt = element.getAttribute('alt') ?? ''
+      return src ? `![${alt}](${src.replace(/\)/g, '\\)')})` : ''
+    }
+    default:
+      return content
+  }
+}
+
+function tableMarkdown(table: HTMLElement): string {
+  const rows = Array.from(table.querySelectorAll('tr')).map((row) =>
+    Array.from(row.children)
+      .filter((cell) => ['th', 'td'].includes(cell.tagName.toLowerCase()))
+      .map((cell) => inlineMarkdown(cell).replace(/\|/g, '\\|').replace(/\n+/g, ' ').trim()),
+  )
+  if (!rows.length) return ''
+  const width = Math.max(...rows.map((row) => row.length), 1)
+  const padded = rows.map((row) => [...row, ...Array(Math.max(0, width - row.length)).fill('')])
+  const header = `| ${padded[0].join(' | ')} |`
+  const divider = `| ${padded[0].map(() => '---').join(' | ')} |`
+  const body = padded.slice(1).map((row) => `| ${row.join(' | ')} |`)
+  return [header, divider, ...body].join('\n')
+}
+
+function listMarkdown(list: HTMLElement, ordered: boolean, depth = 0): string {
+  const indent = '  '.repeat(depth)
+  let index = 1
+  return Array.from(list.children)
+    .filter((child) => child.tagName.toLowerCase() === 'li')
+    .map((child) => {
+      const item = child as HTMLElement
+      const nested = Array.from(item.children).find((element) => ['ul', 'ol'].includes(element.tagName.toLowerCase())) as
+        | HTMLElement
+        | undefined
+      const inline = Array.from(item.childNodes)
+        .filter((node) => !(node.nodeType === Node.ELEMENT_NODE && ['ul', 'ol'].includes((node as HTMLElement).tagName.toLowerCase())))
+        .map(inlineMarkdown)
+        .join('')
+        .replace(/\n+/g, ' ')
+        .trim()
+      const checkbox = item.querySelector(':scope > input[type="checkbox"]') as HTMLInputElement | null
+      const taskPrefix = checkbox ? `[${checkbox.checked ? 'x' : ' '}] ` : ''
+      const marker = ordered ? `${index++}.` : '-'
+      const firstLine = `${indent}${marker} ${taskPrefix}${inline}`.trimEnd()
+      if (!nested) return firstLine
+      return `${firstLine}\n${listMarkdown(nested, nested.tagName.toLowerCase() === 'ol', depth + 1)}`
+    })
+    .join('\n')
+}
+
+function blockMarkdown(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? '').trim()
+  if (node.nodeType !== Node.ELEMENT_NODE) return ''
+
+  const element = node as HTMLElement
+  const tag = element.tagName.toLowerCase()
+  const content = Array.from(element.childNodes).map(inlineMarkdown).join('').trim()
+
+  if (/^h[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag.slice(1)))} ${content}`.trimEnd()
+  if (tag === 'p' || tag === 'div' || tag === 'section' || tag === 'article') return content
+  if (tag === 'blockquote') {
+    return Array.from(element.childNodes)
+      .map((child) => blockMarkdown(child))
+      .join('\n\n')
+      .split('\n')
+      .map((line) => `> ${line}`.trimEnd())
+      .join('\n')
+  }
+  if (tag === 'ul' || tag === 'ol') return listMarkdown(element, tag === 'ol')
+  if (tag === 'pre') {
+    const code = element.querySelector('code')
+    const language = code?.className.match(/language-([\w-]+)/)?.[1] ?? ''
+    const text = code?.textContent ?? element.textContent ?? ''
+    return `\`\`\`${language}\n${text.replace(/\n$/, '')}\n\`\`\``
+  }
+  if (tag === 'hr') return '---'
+  if (tag === 'table') return tableMarkdown(element)
+  if (tag === 'br') return ''
+  return content
+}
+
+/** Best-effort HTML -> Markdown conversion for the common WYSIWYG constructs. */
+function htmlToMarkdown(element: HTMLElement): string {
+  const blocks = Array.from(element.childNodes)
+    .map(blockMarkdown)
+    .map((block) => block.replace(/[ \t]+\n/g, '\n').trim())
+    .filter(Boolean)
+  return blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+function countWords(source: string): number {
+  const cjk = source.match(/[\u3400-\u9fff]/g)?.length ?? 0
+  const latin = source
+    .replace(/[\u3400-\u9fff]/g, ' ')
+    .match(/[A-Za-zÀ-ž0-9_]+/g)?.length ?? 0
+  return cjk + latin
+}
+
+function countOccurrences(source: string, query: string): number {
+  if (!query) return 0
+  let count = 0
+  let from = 0
+  while (from <= source.length) {
+    const index = source.indexOf(query, from)
+    if (index < 0) break
+    count += 1
+    from = index + Math.max(query.length, 1)
+  }
+  return count
+}
+
+function isShortcut(event: KeyboardEvent, key: string): boolean {
+  return event.key.toLowerCase() === key && (event.metaKey || event.ctrlKey)
+}
+
+function updateRef<T>(ref: MutableRefObject<T>, value: T): void {
+  ref.current = value
+}
+
+export function MarkdownEditor({
+  value,
+  onChange,
+  mode,
+  onModeChange,
+  filePath,
+  onSave,
+  onCommand,
+  readOnly = false,
+  placeholder = '开始输入 Markdown…',
+  className = '',
+}: MarkdownEditorProps): React.ReactElement {
+  const editableRef = useRef<HTMLDivElement>(null)
+  const sourceRef = useRef<HTMLTextAreaElement>(null)
+  const onChangeRef = useRef(onChange)
+  const onSaveRef = useRef(onSave)
+  const onCommandRef = useRef(onCommand)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [replacement, setReplacement] = useState('')
+
+  updateRef(onChangeRef, onChange)
+  updateRef(onSaveRef, onSave)
+  updateRef(onCommandRef, onCommand)
+
+  const html = useMemo(() => markdownToHtml(value), [value])
+  const words = useMemo(() => countWords(value), [value])
+  const characters = useMemo(() => Array.from(value).length, [value])
+  const matches = useMemo(() => countOccurrences(value, findQuery), [value, findQuery])
+
+  useEffect(() => {
+    if (mode !== 'wysiwyg' || !editableRef.current) return
+    const appliedValue = editableRef.current.dataset.markdownValue
+    if (appliedValue !== value) {
+      editableRef.current.innerHTML = html
+      editableRef.current.dataset.markdownValue = value
+    }
+  }, [html, mode, value])
+
+  useEffect(() => {
+    if (mode === 'source') sourceRef.current?.focus()
+  }, [mode])
+
+  const emitCommand = (command: MarkdownEditorCommand): void => {
+    onCommandRef.current?.(command)
+  }
+
+  const save = (): void => {
+    emitCommand({ type: 'save' })
+    void onSaveRef.current?.()
+  }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (isShortcut(event, 's')) {
+      event.preventDefault()
+      if (!readOnly) save()
+      return
+    }
+    if (isShortcut(event, 'f')) {
+      event.preventDefault()
+      setFindOpen(true)
+      emitCommand({ type: 'find', query: findQuery })
+    }
+  }
+
+  const handleWysiwygInput = (): void => {
+    if (!editableRef.current || readOnly) return
+    const nextValue = htmlToMarkdown(editableRef.current)
+    editableRef.current.dataset.markdownValue = nextValue
+    if (nextValue !== value) onChangeRef.current(nextValue)
+  }
+
+  const replaceAll = (): void => {
+    if (!findQuery || readOnly) return
+    const nextValue = value.split(findQuery).join(replacement)
+    if (nextValue !== value) onChangeRef.current(nextValue)
+    emitCommand({ type: 'replace-all', query: findQuery, replacement })
+  }
+
+  const rootClassName = ['markdown-editor', className].filter(Boolean).join(' ')
+  const displayName = filePath || '未命名.md'
+
+  return (
+    <section className={rootClassName} onKeyDown={handleKeyDown} aria-label="Markdown 编辑器">
+      <header className="markdown-editor__toolbar">
+        <div className="markdown-editor__modes" role="tablist" aria-label="编辑模式">
+          {(['reader', 'wysiwyg', 'source'] as MarkdownEditorMode[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={mode === item ? 'is-active' : ''}
+              role="tab"
+              aria-selected={mode === item}
+              onClick={() => onModeChange(item)}
+            >
+              {item === 'reader' ? '阅读' : item === 'wysiwyg' ? '所见即所得' : '源码'}
+            </button>
+          ))}
+        </div>
+        <div className="markdown-editor__file" title={filePath}>{displayName}</div>
+        <div className="markdown-editor__actions">
+          <button type="button" onClick={() => { setFindOpen((open) => !open); emitCommand({ type: 'find', query: findQuery }) }}>
+            查找替换
+          </button>
+          <button type="button" onClick={save} disabled={readOnly}>保存</button>
+        </div>
+      </header>
+
+      {findOpen && (
+        <div className="markdown-editor__findbar" role="search">
+          <label>
+            查找
+            <input value={findQuery} onChange={(event) => setFindQuery(event.target.value)} autoFocus />
+          </label>
+          <label>
+            替换为
+            <input value={replacement} onChange={(event) => setReplacement(event.target.value)} />
+          </label>
+          <span className="markdown-editor__match-count">{matches} 处</span>
+          <button type="button" onClick={replaceAll} disabled={!findQuery || readOnly}>全部替换</button>
+          <button type="button" onClick={() => setFindOpen(false)} aria-label="关闭查找">关闭</button>
+        </div>
+      )}
+
+      <div className={`markdown-editor__body markdown-editor__body--${mode}`}>
+        {mode === 'wysiwyg' && (
+          <div
+            ref={editableRef}
+            className="markdown-editor__wysiwyg"
+            contentEditable={!readOnly}
+            suppressContentEditableWarning
+            data-placeholder={placeholder}
+            onInput={handleWysiwygInput}
+            onFocus={() => emitCommand({ type: 'focus' })}
+          />
+        )}
+        {mode === 'source' && (
+          <textarea
+            ref={sourceRef}
+            className="markdown-editor__source"
+            value={value}
+            readOnly={readOnly}
+            placeholder={placeholder}
+            spellCheck
+            onChange={(event) => onChangeRef.current(event.target.value)}
+            aria-label="Markdown 源码"
+          />
+        )}
+        {mode === 'reader' && (
+          <article className="markdown-editor__reader" dangerouslySetInnerHTML={{ __html: html }} />
+        )}
+      </div>
+
+      <footer className="markdown-editor__status">
+        <span>{words} 字词</span>
+        <span>{characters} 字符</span>
+        <span>{mode === 'reader' ? '阅读模式' : readOnly ? '只读' : '可编辑'}</span>
+      </footer>
+    </section>
+  )
+}
+
+export default MarkdownEditor

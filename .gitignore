@@ -1,0 +1,10 @@
+node_modules/
+.pnpm-store/
+.electron-cache/
+dist/
+dist-electron/
+release/
+test-artifacts/
+*.log
+.DS_Store
+Thumbs.db
