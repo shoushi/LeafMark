@@ -1,4 +1,6 @@
 import React, {
+  type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   type MutableRefObject,
   useEffect,
@@ -8,6 +10,7 @@ import React, {
 } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import type { ExportDocumentFormat, ExportDocumentResult } from '../shared/types'
 
 import './editor.css'
 
@@ -27,13 +30,31 @@ export interface MarkdownEditorProps {
   onModeChange: (mode: MarkdownEditorMode) => void
   filePath?: string
   onSave?: () => void | Promise<void>
+  onExport?: (format: ExportDocumentFormat) => ExportDocumentResult | null | void | Promise<ExportDocumentResult | null | void>
   onCommand?: (command: MarkdownEditorCommand) => void
   readOnly?: boolean
   placeholder?: string
   className?: string
 }
 
-const SAFE_URI = /^(?:(?:https?|mailto|tel|asset|blob):|(?:\.?\.?\/|#)|data:image\/(?:png|gif|jpe?g|webp|svg\+xml);)/i
+const SAFE_URI = /^(?:(?:https?|mailto|tel|asset|blob):|(?:\/?|\.\.?\/|[^:/?#\s]+(?:\/[^?#\s]*)?(?:[?#].*)?)|#|data:image\/(?:png|gif|webp|svg\+xml);)/i
+const IMAGE_EXTENSIONS = /\.(?:png|jpe?g|gif|webp|avif|bmp|svg|ico)$/i
+
+function isImageFile(file: File): boolean {
+  return file.type.toLowerCase().startsWith('image/') || IMAGE_EXTENSIONS.test(file.name)
+}
+
+function imageFilesFromTransfer(transfer: DataTransfer | null): File[] {
+  if (!transfer) return []
+  const fromFiles = Array.from(transfer.files)
+  const files = fromFiles.length
+    ? fromFiles
+    : Array.from(transfer.items)
+      .filter((item) => item.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+  return files.filter(isImageFile)
+}
 
 function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
@@ -77,7 +98,7 @@ function inlineMarkdown(node: Node): string {
       return href ? `[${content}](${href.replace(/\)/g, '\\)')})` : content
     }
     case 'img': {
-      const src = element.getAttribute('src') ?? ''
+      const src = element.getAttribute('data-markdown-src') ?? element.getAttribute('src') ?? ''
       const alt = element.getAttribute('alt') ?? ''
       return src ? `![${alt}](${src.replace(/\)/g, '\\)')})` : ''
     }
@@ -154,6 +175,7 @@ function blockMarkdown(node: Node): string {
   }
   if (tag === 'hr') return '---'
   if (tag === 'table') return tableMarkdown(element)
+  if (tag === 'img') return inlineMarkdown(element)
   if (tag === 'br') return ''
   return content
 }
@@ -203,6 +225,7 @@ export function MarkdownEditor({
   onModeChange,
   filePath,
   onSave,
+  onExport,
   onCommand,
   readOnly = false,
   placeholder = '开始输入 Markdown…',
@@ -210,16 +233,30 @@ export function MarkdownEditor({
 }: MarkdownEditorProps): React.ReactElement {
   const editableRef = useRef<HTMLDivElement>(null)
   const sourceRef = useRef<HTMLTextAreaElement>(null)
+  const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
+  const onExportRef = useRef(onExport)
   const onCommandRef = useRef(onCommand)
+  const attachmentPreviewUrlsRef = useRef<string[]>([])
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [replacement, setReplacement] = useState('')
+  const [attachmentStatus, setAttachmentStatus] = useState('')
+  const [exportFormat, setExportFormat] = useState<ExportDocumentFormat>('markdown')
+  const [exportBusy, setExportBusy] = useState(false)
+  const [exportStatus, setExportStatus] = useState('')
 
+  updateRef(valueRef, value)
   updateRef(onChangeRef, onChange)
   updateRef(onSaveRef, onSave)
+  updateRef(onExportRef, onExport)
   updateRef(onCommandRef, onCommand)
+
+  useEffect(() => () => {
+    for (const url of attachmentPreviewUrlsRef.current) URL.revokeObjectURL(url)
+    attachmentPreviewUrlsRef.current = []
+  }, [])
 
   const html = useMemo(() => markdownToHtml(value), [value])
   const words = useMemo(() => countWords(value), [value])
@@ -248,6 +285,22 @@ export function MarkdownEditor({
     void onSaveRef.current?.()
   }
 
+  const exportCurrent = async (): Promise<void> => {
+    const callback = onExportRef.current
+    if (!callback || exportBusy) return
+    setExportBusy(true)
+    setExportStatus(`正在导出 ${exportFormat === 'html' ? 'HTML' : 'Markdown'}…`)
+    try {
+      const result = await callback(exportFormat)
+      setExportStatus(result ? `已导出为 ${exportFormat === 'html' ? 'HTML' : 'Markdown'}` : '已取消导出')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setExportStatus(`导出失败：${message}`)
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (isShortcut(event, 's')) {
       event.preventDefault()
@@ -268,6 +321,127 @@ export function MarkdownEditor({
     if (nextValue !== value) onChangeRef.current(nextValue)
   }
 
+  const saveImageFiles = async (
+    files: File[],
+    sourceSelection?: { value: string; start: number; end: number },
+    wysiwygSelection?: Range,
+  ): Promise<void> => {
+    if (!files.length || !filePath || readOnly || mode === 'reader') return
+    setAttachmentStatus(`正在保存 ${files.length} 张图片…`)
+    try {
+      const attachments = []
+      for (const file of files) {
+        const data = await file.arrayBuffer()
+        const attachment = await window.markdownDesktop.saveAttachment({
+          markdownPath: filePath,
+          data,
+          name: file.name,
+          mimeType: file.type,
+        })
+        attachments.push({ attachment, file })
+      }
+
+      if (mode === 'source') {
+        const currentValue = valueRef.current
+        const currentSelection = sourceRef.current
+        const selection = currentValue === sourceSelection?.value && sourceSelection
+          ? sourceSelection
+          : {
+            value: currentValue,
+            start: currentSelection?.selectionStart ?? currentValue.length,
+            end: currentSelection?.selectionEnd ?? currentValue.length,
+          }
+        const inserted = attachments.map(({ attachment }) => attachment.markdown).join('\n')
+        const start = Math.max(0, Math.min(selection.start, selection.value.length))
+        const end = Math.max(start, Math.min(selection.end, selection.value.length))
+        const nextValue = `${selection.value.slice(0, start)}${inserted}${selection.value.slice(end)}`
+        valueRef.current = nextValue
+        onChangeRef.current(nextValue)
+        window.requestAnimationFrame(() => {
+          const textarea = sourceRef.current
+          if (!textarea) return
+          textarea.focus()
+          const cursor = start + inserted.length
+          textarea.setSelectionRange(cursor, cursor)
+        })
+      } else if (editableRef.current) {
+        const editable = editableRef.current
+        const range = wysiwygSelection && editable.contains(wysiwygSelection.commonAncestorContainer)
+          ? wysiwygSelection.cloneRange()
+          : document.createRange()
+        if (!wysiwygSelection || !editable.contains(wysiwygSelection.commonAncestorContainer)) {
+          range.selectNodeContents(editable)
+          range.collapse(false)
+        }
+        range.deleteContents()
+        const fragment = document.createDocumentFragment()
+        attachments.forEach(({ attachment, file }, index) => {
+          if (index > 0) fragment.appendChild(document.createTextNode('\n'))
+          const image = document.createElement('img')
+          const previewUrl = URL.createObjectURL(file)
+          attachmentPreviewUrlsRef.current.push(previewUrl)
+          image.src = previewUrl
+          image.alt = attachment.name.replace(/\.[^.]+$/, '')
+          image.dataset.markdownSrc = attachment.relativePath
+          image.dataset.leafmarkAttachment = 'true'
+          image.draggable = false
+          fragment.appendChild(image)
+        })
+        range.insertNode(fragment)
+        range.collapse(false)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+        handleWysiwygInput()
+      }
+      setAttachmentStatus(`${attachments.length} 张图片已添加到 attachments`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法保存图片附件'
+      setAttachmentStatus(`图片附件失败：${message}`)
+    }
+  }
+
+  const handlePaste = (event: ClipboardEvent<HTMLElement>): void => {
+    if (readOnly || !filePath || (mode !== 'source' && mode !== 'wysiwyg')) return
+    const files = imageFilesFromTransfer(event.clipboardData)
+    if (!files.length) return
+    event.preventDefault()
+    const sourceSelection = mode === 'source' && sourceRef.current
+      ? {
+        value: sourceRef.current.value,
+        start: sourceRef.current.selectionStart,
+        end: sourceRef.current.selectionEnd,
+      }
+      : undefined
+    const selection = mode === 'wysiwyg' ? window.getSelection() : null
+    const wysiwygSelection = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : undefined
+    void saveImageFiles(files, sourceSelection, wysiwygSelection)
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLElement>): void => {
+    if (readOnly || !filePath || (mode !== 'source' && mode !== 'wysiwyg')) return
+    if (!imageFilesFromTransfer(event.dataTransfer).length) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDrop = (event: DragEvent<HTMLElement>): void => {
+    if (readOnly || !filePath || (mode !== 'source' && mode !== 'wysiwyg')) return
+    const files = imageFilesFromTransfer(event.dataTransfer)
+    if (!files.length) return
+    event.preventDefault()
+    const sourceSelection = mode === 'source' && sourceRef.current
+      ? {
+        value: sourceRef.current.value,
+        start: sourceRef.current.selectionStart,
+        end: sourceRef.current.selectionEnd,
+      }
+      : undefined
+    const selection = mode === 'wysiwyg' ? window.getSelection() : null
+    const wysiwygSelection = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : undefined
+    void saveImageFiles(files, sourceSelection, wysiwygSelection)
+  }
+
   const replaceAll = (): void => {
     if (!findQuery || readOnly) return
     const nextValue = value.split(findQuery).join(replacement)
@@ -279,7 +453,14 @@ export function MarkdownEditor({
   const displayName = filePath || '未命名.md'
 
   return (
-    <section className={rootClassName} onKeyDown={handleKeyDown} aria-label="Markdown 编辑器">
+    <section
+      className={rootClassName}
+      onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      aria-label="Markdown 编辑器"
+    >
       <header className="markdown-editor__toolbar">
         <div className="markdown-editor__modes" role="tablist" aria-label="编辑模式">
           {(['reader', 'wysiwyg', 'source'] as MarkdownEditorMode[]).map((item) => (
@@ -300,6 +481,19 @@ export function MarkdownEditor({
           <button type="button" onClick={() => { setFindOpen((open) => !open); emitCommand({ type: 'find', query: findQuery }) }}>
             查找替换
           </button>
+          <label className="markdown-editor__export-format">
+            <span className="sr-only">导出格式</span>
+            <select
+              value={exportFormat}
+              onChange={(event) => setExportFormat(event.target.value as ExportDocumentFormat)}
+              disabled={!onExport || exportBusy}
+              aria-label="导出格式"
+            >
+              <option value="markdown">Markdown (.md)</option>
+              <option value="html">HTML (.html)</option>
+            </select>
+          </label>
+          <button type="button" onClick={() => void exportCurrent()} disabled={!onExport || exportBusy}>导出</button>
           <button type="button" onClick={save} disabled={readOnly}>保存</button>
         </div>
       </header>
@@ -350,6 +544,8 @@ export function MarkdownEditor({
       </div>
 
       <footer className="markdown-editor__status">
+        {attachmentStatus && <span className="markdown-editor__attachment-status" aria-live="polite">{attachmentStatus}</span>}
+        {exportStatus && <span className="markdown-editor__export-status" aria-live="polite">{exportStatus}</span>}
         <span>{words} 字词</span>
         <span>{characters} 字符</span>
         <span>{mode === 'reader' ? '阅读模式' : readOnly ? '只读' : '可编辑'}</span>

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MarkdownEditor, type MarkdownEditorMode } from './editor'
 import type {
   FileChangeEvent,
+  ExportDocumentFormat,
+  ExportDocumentResult,
+  HistorySnapshot,
   MarkdownDocument,
   MarkdownFileInfo,
   SearchResult,
@@ -69,6 +72,11 @@ export default function App() {
   const [directoriesLoading, setDirectoriesLoading] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState('')
+  const [historyDialog, setHistoryDialog] = useState<{ path: string; snapshots: HistorySnapshot[] } | null>(null)
+  const [historySelectedId, setHistorySelectedId] = useState<string | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyBusy, setHistoryBusy] = useState(false)
+  const [historyError, setHistoryError] = useState('')
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
 
@@ -140,6 +148,28 @@ export default function App() {
     }
   }, [tabs])
 
+  const exportTab = useCallback(async (path: string, format: ExportDocumentFormat): Promise<ExportDocumentResult | null> => {
+    const tab = tabs.find((candidate) => candidate.path === path)
+    if (!tab) return null
+    setMessage(`正在导出 ${basename(path)}…`)
+    try {
+      const result = await window.markdownDesktop.exportDocument({
+        content: tab.draft,
+        format,
+        suggestedName: basename(path),
+      })
+      if (!result) {
+        setMessage('已取消导出')
+        return null
+      }
+      setMessage(`已导出 ${basename(result.path)}`)
+      return result
+    } catch (error) {
+      setMessage(`导出失败：${error instanceof Error ? error.message : String(error)}`)
+      throw error
+    }
+  }, [tabs])
+
   const reloadTab = useCallback(async (path: string) => {
     const document = await window.markdownDesktop.readFile(path)
     setTabs((current) => current.map((item) => item.path === path
@@ -147,6 +177,76 @@ export default function App() {
       : item))
     setMessage(`已重新载入 ${basename(path)}`)
   }, [])
+
+  const mergeDiskVersion = useCallback(async (path: string) => {
+    const tab = tabs.find((candidate) => candidate.path === path)
+    if (!tab) return
+    setBusy(true)
+    try {
+      const result = await window.markdownDesktop.mergeFile(path, tab.content, tab.draft)
+      setTabs((current) => current.map((item) => item.path === path
+        ? {
+            ...item,
+            content: result.remoteContent,
+            draft: result.content,
+            dirty: result.content !== result.remoteContent,
+            externalChange: result.hasConflicts,
+            hash: result.remoteHash,
+            modifiedAt: result.remoteModifiedAt,
+            size: result.remoteSize,
+            hasBom: result.remoteHasBom,
+          }
+        : item))
+      setMessage(result.hasConflicts ? '合并完成，但存在冲突标记，请检查后保存。' : '已合并磁盘版本。')
+    } catch (error) {
+      setMessage(`合并失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [tabs])
+
+  const openHistory = useCallback(async (path: string) => {
+    setHistoryLoading(true)
+    setHistoryError('')
+    try {
+      const snapshots = await window.markdownDesktop.listSnapshots(path)
+      setHistoryDialog({ path, snapshots })
+      setHistorySelectedId(snapshots[0]?.id ?? null)
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [])
+
+  const closeHistory = () => {
+    if (historyBusy) return
+    setHistoryDialog(null)
+    setHistorySelectedId(null)
+    setHistoryError('')
+  }
+
+  const restoreSelectedSnapshot = async () => {
+    if (!historyDialog || !historySelectedId || historyBusy) return
+    setHistoryBusy(true)
+    setHistoryError('')
+    try {
+      await window.markdownDesktop.restoreSnapshot(historyDialog.path, historySelectedId)
+      const document = await window.markdownDesktop.readFile(historyDialog.path)
+      setTabs((current) => current.map((item) => item.path === historyDialog.path
+        ? { ...document, draft: document.content, dirty: false, externalChange: false }
+        : item))
+      await refreshFiles()
+      const snapshots = await window.markdownDesktop.listSnapshots(historyDialog.path)
+      setHistoryDialog({ path: historyDialog.path, snapshots })
+      setHistorySelectedId(snapshots[0]?.id ?? null)
+      setMessage(`已恢复 ${basename(historyDialog.path)} 的历史版本。`)
+    } catch (error) {
+      setHistoryError(`恢复失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setHistoryBusy(false)
+    }
+  }
 
   useEffect(() => {
     void window.markdownDesktop.getWorkspace().then(async (current) => {
@@ -220,6 +320,8 @@ export default function App() {
     }
     return [root, ...directories.filter((directory) => directory.path !== root.path)]
   }, [directories, workspace])
+
+  const selectedHistorySnapshot = historyDialog?.snapshots.find((snapshot) => snapshot.id === historySelectedId)
 
   const openCreateDialog = (kind: CreateDialogKind) => {
     if (!workspace) return
@@ -353,6 +455,8 @@ export default function App() {
                 <div className="conflict-banner">
                   磁盘文件发生变化。为防止覆盖，自动保存已暂停。
                   <button onClick={() => void reloadTab(activeTab.path)}>载入磁盘版本</button>
+                  <button onClick={() => void mergeDiskVersion(activeTab.path)}>合并磁盘版本</button>
+                  <button onClick={() => void openHistory(activeTab.path)} disabled={historyLoading}>历史</button>
                   <button onClick={() => setTabs((current) => current.map((tab) => tab.path === activeTab.path ? { ...tab, externalChange: false } : tab))}>保留编辑内容</button>
                 </div>
               )}
@@ -365,6 +469,7 @@ export default function App() {
                 onModeChange={setMode}
                 filePath={activeTab.path}
                 onSave={() => saveTab(activeTab.path)}
+                onExport={(format) => exportTab(activeTab.path, format)}
               />
             </>
           ) : (
@@ -472,6 +577,49 @@ export default function App() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {historyDialog && (
+        <div className="dialog-backdrop">
+          <section className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-dialog-title">
+            <div className="dialog-header">
+              <div>
+                <h2 id="history-dialog-title">历史版本 · {basename(historyDialog.path)}</h2>
+                <p>每次成功保存前会保留一个快照，历史目录不会出现在文档列表中。</p>
+              </div>
+              <button className="dialog-close" type="button" onClick={closeHistory} disabled={historyBusy} aria-label="关闭">×</button>
+            </div>
+
+            <div className="history-layout">
+              <div className="history-list" aria-label="历史版本列表">
+                {historyDialog.snapshots.length ? historyDialog.snapshots.map((snapshot) => (
+                  <button
+                    className={`history-item ${snapshot.id === historySelectedId ? 'active' : ''}`}
+                    key={snapshot.id}
+                    type="button"
+                    onClick={() => setHistorySelectedId(snapshot.id)}
+                    disabled={historyBusy}
+                  >
+                    <b>{new Date(snapshot.createdAt).toLocaleString()}</b>
+                    <small>{snapshot.size.toLocaleString()} 字节 · {snapshot.hash.slice(0, 8)}</small>
+                  </button>
+                )) : <p className="muted history-empty">暂无历史快照</p>}
+              </div>
+              <div className="history-preview-wrap">
+                <div className="history-preview-label">预览</div>
+                <pre className="history-preview">{selectedHistorySnapshot?.content ?? '选择一个历史版本查看内容。'}</pre>
+              </div>
+            </div>
+
+            {historyError && <div className="dialog-error" role="alert">{historyError}</div>}
+            <div className="dialog-actions">
+              <button type="button" onClick={closeHistory} disabled={historyBusy}>关闭</button>
+              <button type="button" className="primary" onClick={() => void restoreSelectedSnapshot()} disabled={historyBusy || !selectedHistorySnapshot}>
+                {historyBusy ? '恢复中…' : '恢复此版本'}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </div>

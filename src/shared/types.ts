@@ -68,6 +68,32 @@ export interface SavedFileResult {
   hash: string
 }
 
+export interface HistorySnapshot {
+  /** Stable identifier used by restoreSnapshot. */
+  id: string
+  /** Path relative to the active workspace. */
+  relativePath: string
+  /** Unix epoch milliseconds when the snapshot was created. */
+  createdAt: number
+  size: number
+  hash: string
+  /** UTF-8 text from before an atomic save. */
+  content: string
+  hasBom: boolean
+}
+
+export interface MergeFileResult {
+  path: string
+  /** The current disk version used as the merge remote/base for saving. */
+  remoteContent: string
+  remoteHash: string
+  remoteModifiedAt: number
+  remoteSize: number
+  remoteHasBom: boolean
+  content: string
+  hasConflicts: boolean
+}
+
 export interface FileChangeEvent {
   type: 'add' | 'change' | 'unlink'
   path: string
@@ -101,6 +127,45 @@ export interface CreateDirectoryOptions {
   name: string
 }
 
+export interface SaveAttachmentOptions {
+  /** Absolute path of the Markdown document receiving the image reference. */
+  markdownPath: string
+  /** Image bytes supplied by the renderer from a clipboard or drag-and-drop File. */
+  data: ArrayBuffer | Uint8Array
+  /** Original file name when one is available. */
+  name?: string
+  /** MIME type reported by the clipboard or dragged file. */
+  mimeType?: string
+}
+
+export interface SavedAttachmentResult {
+  path: string
+  /** Path relative to the Markdown document, using `/` separators. */
+  relativePath: string
+  name: string
+  mimeType: string
+  size: number
+  markdown: string
+}
+
+export type ExportDocumentFormat = 'markdown' | 'html'
+
+export interface ExportDocumentOptions {
+  /** Markdown source to export. The export intentionally uses the current draft. */
+  content: string
+  /** Output format selected by the user. */
+  format: ExportDocumentFormat
+  /** Original document name used only as the save dialog's suggested name. */
+  suggestedName?: string
+}
+
+export interface ExportDocumentResult {
+  /** Absolute path selected in the native save dialog. */
+  path: string
+  format: ExportDocumentFormat
+  size: number
+}
+
 export interface RenameOptions {
   path: string
   /** A new name in the same directory, or an absolute destination in the active workspace. */
@@ -117,6 +182,11 @@ export interface MarkdownDesktopAPI {
   listDirectories(): Promise<WorkspaceDirectoryInfo[]>
   readFile(path: string): Promise<MarkdownDocument>
   saveFile(path: string, content: string, options?: SaveFileOptions): Promise<SavedFileResult>
+  listSnapshots(path: string): Promise<HistorySnapshot[]>
+  restoreSnapshot(path: string, snapshotId: string): Promise<SavedFileResult>
+  mergeFile(path: string, baseContent: string, localContent: string): Promise<MergeFileResult>
+  saveAttachment(options: SaveAttachmentOptions): Promise<SavedAttachmentResult>
+  exportDocument(options: ExportDocumentOptions): Promise<ExportDocumentResult | null>
   createFile(options: CreateFileOptions): Promise<MarkdownFileInfo>
   createDirectory(options: CreateDirectoryOptions): Promise<{ path: string; name: string }>
   rename(options: RenameOptions): Promise<{ path: string; name: string; isDirectory: boolean }>

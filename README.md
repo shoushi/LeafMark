@@ -12,6 +12,9 @@ LeafMark 是一个本地优先的桌面 Markdown 编辑器 MVP。文档始终保
 - 临时文件写入、崩溃保护基础、外部文件监听
 - 创建 Markdown 文件、最近工作区和安全外链
 - Renderer 沙箱、Context Isolation、CSP 和白名单 IPC
+- 图片粘贴/拖放到工作区 `attachments/`，自动插入 Markdown 引用
+- 保存前历史快照、历史恢复和行级三方冲突合并
+- Markdown/HTML 导出
 
 ## 开发
 
@@ -43,7 +46,7 @@ pnpm build
 pnpm package
 ```
 
-Windows 当前可直接使用 `release/LeafMark-0.1.0-win-x64-portable.zip`：解压到任意目录后双击 `LeafMark.exe`。这是免安装版本，不会写入注册表；如需桌面快捷方式可右键创建快捷方式。
+Windows 当前可直接使用 `release/LeafMark-0.2.0-win-x64-portable.zip`：解压到任意目录后双击 `LeafMark.exe`。这是免安装版本，不会写入注册表；如需桌面快捷方式可右键创建快捷方式。
 
 NSIS `.exe` 安装器需要额外下载 Windows 打包工具；在无法访问 GitHub Release 的网络环境中，优先使用上述 portable ZIP。
 
@@ -62,10 +65,8 @@ pnpm rebuild electron
 - 删除 API 使用系统回收站；当前界面尚未暴露批量删除。
 - WYSIWYG 使用 HTML 到 Markdown 的简化转换。复杂或自定义 Markdown 语法应切换到源码模式编辑；生产版需要继续完善块级无损序列化。
 
-## 下一阶段
+## 后续阶段
 
 - CodeMirror 6 源码编辑器与 Milkdown/ProseMirror 无损编辑内核
-- 图片粘贴到工作区附件目录
-- 历史快照与三方冲突合并
-- SQLite FTS5 增量索引、Mermaid、KaTeX 和导出
+- SQLite FTS5 增量索引、Mermaid、KaTeX
 - Windows/macOS/Linux 签名与自动更新

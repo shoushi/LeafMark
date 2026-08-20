@@ -36,6 +36,22 @@
   font-size: 12px;
 }
 
+.markdown-editor__attachment-status {
+  margin-right: auto;
+  overflow: hidden;
+  color: var(--editor-accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-editor__export-status {
+  margin-right: auto;
+  overflow: hidden;
+  color: var(--editor-accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .markdown-editor__modes,
 .markdown-editor__actions {
   display: flex;
@@ -68,6 +84,35 @@
 .markdown-editor button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.markdown-editor__export-format select {
+  max-width: 150px;
+  padding: 4px 6px;
+  border: 1px solid var(--editor-border);
+  border-radius: 6px;
+  color: #374151;
+  background: var(--editor-surface);
+  font: inherit;
+  font-size: 12px;
+}
+
+.markdown-editor__export-format select:focus {
+  border-color: var(--editor-accent);
+  outline: 0;
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 15%);
+}
+
+.markdown-editor .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .markdown-editor__file {
