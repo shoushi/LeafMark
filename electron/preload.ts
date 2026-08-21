@@ -12,6 +12,7 @@ import type {
   SaveAttachmentOptions,
   SaveFileOptions,
   SearchOptions,
+  UpdateState,
 } from '../src/shared/types'
 
 const CHANNELS = {
@@ -36,6 +37,11 @@ const CHANNELS = {
   listRecent: 'recent:list',
   removeRecent: 'recent:remove',
   openExternal: 'external:open',
+  updateState: 'update:state',
+  updateGetState: 'update:get-state',
+  updateCheck: 'update:check',
+  updateDownload: 'update:download',
+  updateInstall: 'update:install',
   fileChanged: 'workspace:file-changed',
 } as const
 
@@ -58,6 +64,15 @@ const api: MarkdownDesktopAPI = {
   rename: (options: RenameOptions) => ipcRenderer.invoke(CHANNELS.rename, options),
   trash: (filePath) => ipcRenderer.invoke(CHANNELS.trash, filePath),
   search: (query, options?: SearchOptions) => ipcRenderer.invoke(CHANNELS.search, query, options),
+  getUpdateState: (): Promise<UpdateState> => ipcRenderer.invoke(CHANNELS.updateGetState),
+  checkForUpdates: (): Promise<UpdateState> => ipcRenderer.invoke(CHANNELS.updateCheck),
+  downloadUpdate: (): Promise<UpdateState> => ipcRenderer.invoke(CHANNELS.updateDownload),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke(CHANNELS.updateInstall),
+  onUpdateState: (listener: (state: UpdateState) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: UpdateState) => listener(payload)
+    ipcRenderer.on(CHANNELS.updateState, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.updateState, handler)
+  },
   listRecentWorkspaces: () => ipcRenderer.invoke(CHANNELS.listRecent),
   removeRecentWorkspace: (workspacePath) => ipcRenderer.invoke(CHANNELS.removeRecent, workspacePath),
   onFileChanged: (listener: (event: FileChangeEvent) => void) => {

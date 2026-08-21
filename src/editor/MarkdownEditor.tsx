@@ -71,6 +71,11 @@ function encodeRichValue(value: string): string {
   return encodeURIComponent(value).replace(/'/g, '%27')
 }
 
+function decodeRichValue(value: string | undefined): string {
+  if (!value) return ''
+  try { return decodeURIComponent(value) } catch { return value }
+}
+
 function protectRichSyntax(source: string): string {
   const mermaidBlocks: string[] = []
   const withoutMermaid = source.replace(/```([^\n]*)\n([\s\S]*?)```/g, (full, language: string, body: string) => {
@@ -182,6 +187,13 @@ function inlineMarkdown(node: Node): string {
 
   const element = node as HTMLElement
   const tag = element.tagName.toLowerCase()
+  if (element.dataset.leafmarkKatex !== undefined) {
+    const expression = decodeRichValue(element.dataset.leafmarkKatex)
+    return element.dataset.display === 'true' ? `$$\n${expression}\n$$` : `$${expression}$`
+  }
+  if (element.dataset.leafmarkMermaid !== undefined) {
+    return `\`\`\`mermaid\n${decodeRichValue(element.dataset.leafmarkMermaid)}\n\`\`\``
+  }
   const content = Array.from(element.childNodes).map(inlineMarkdown).join('')
 
   switch (tag) {
@@ -259,6 +271,12 @@ function blockMarkdown(node: Node): string {
 
   const element = node as HTMLElement
   const tag = element.tagName.toLowerCase()
+  if (element.dataset.leafmarkMermaid !== undefined) {
+    return `\`\`\`mermaid\n${decodeRichValue(element.dataset.leafmarkMermaid)}\n\`\`\``
+  }
+  if (element.dataset.leafmarkKatex !== undefined && element.dataset.display === 'true') {
+    return `$$\n${decodeRichValue(element.dataset.leafmarkKatex)}\n$$`
+  }
   const content = Array.from(element.childNodes).map(inlineMarkdown).join('').trim()
 
   if (/^h[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag.slice(1)))} ${content}`.trimEnd()

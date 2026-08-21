@@ -6,10 +6,11 @@ import {
   shell,
   type OpenDialogOptions,
 } from 'electron'
-import { promises as fs, watch as watchFs, type FSWatcher } from 'node:fs'
+import { existsSync, promises as fs, watch as watchFs, type FSWatcher } from 'node:fs'
 import * as path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { marked } from 'marked'
+import { autoUpdater } from 'electron-updater'
 import type {
   CreateDirectoryOptions,
   CreateFileOptions,
@@ -30,6 +31,7 @@ import type {
   ExportDocumentResult,
   WorkspaceDirectoryInfo,
   WorkspaceInfo,
+  UpdateState,
 } from '../src/shared/types'
 import { mergeThreeWay } from '../src/shared/merge'
 import { closeSearchIndex, searchIndexed } from './searchIndex'
@@ -56,6 +58,11 @@ const CHANNELS = {
   listRecent: 'recent:list',
   removeRecent: 'recent:remove',
   openExternal: 'external:open',
+  updateState: 'update:state',
+  updateGetState: 'update:get-state',
+  updateCheck: 'update:check',
+  updateDownload: 'update:download',
+  updateInstall: 'update:install',
   fileChanged: 'workspace:file-changed',
 } as const
 
@@ -106,6 +113,7 @@ let currentWorkspace: WorkspaceInfo | null = null
 let nativeWatcher: FSWatcher | null = null
 const fallbackWatchers = new Map<string, FSWatcher>()
 let watcherGeneration = 0
+let updateState: UpdateState = { status: 'disabled', message: '当前版本未配置更新渠道。' }
 
 function markdownPath(filePath: string): boolean {
   return MARKDOWN_EXTENSIONS.has(path.extname(filePath).toLowerCase())
@@ -897,6 +905,94 @@ async function openExternal(url: string): Promise<void> {
   await shell.openExternal(parsed.toString())
 }
 
+let updaterConfigured = false
+
+function updateConfigPath(): string {
+  return path.join(process.resourcesPath, 'app-update.yml')
+}
+
+function updatesEnabled(): boolean {
+  return app.isPackaged
+    && process.env.LEAFMARK_UPDATE_DISABLED !== '1'
+    && existsSync(updateConfigPath())
+}
+
+function publishUpdateState(next: UpdateState): void {
+  updateState = next
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(CHANNELS.updateState, updateState)
+  }
+}
+
+function updateDetails(info: { version?: string; releaseDate?: string }): Pick<UpdateState, 'version' | 'releaseDate'> {
+  return {
+    ...(info.version ? { version: info.version } : {}),
+    ...(info.releaseDate ? { releaseDate: info.releaseDate } : {}),
+  }
+}
+
+function updateErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function configureAutoUpdater(): void {
+  if (updaterConfigured) return
+  updaterConfigured = true
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+  if (!updatesEnabled()) {
+    publishUpdateState({ status: 'disabled', message: '当前版本未配置更新渠道。' })
+    return
+  }
+
+  autoUpdater.on('checking-for-update', () => publishUpdateState({ status: 'checking' }))
+  autoUpdater.on('update-available', (info) => publishUpdateState({ status: 'available', ...updateDetails(info) }))
+  autoUpdater.on('update-not-available', (info) => publishUpdateState({ status: 'not-available', ...updateDetails(info) }))
+  autoUpdater.on('download-progress', (info) => publishUpdateState({
+    status: 'downloading',
+    progress: Math.max(0, Math.min(100, Number(info.percent) || 0)),
+  }))
+  autoUpdater.on('update-downloaded', (info) => publishUpdateState({ status: 'downloaded', ...updateDetails(info), progress: 100 }))
+  autoUpdater.on('error', (error) => publishUpdateState({ status: 'error', message: updateErrorMessage(error) }))
+  publishUpdateState({ status: 'idle' })
+}
+
+async function checkForUpdates(): Promise<UpdateState> {
+  if (!updatesEnabled()) {
+    publishUpdateState({ status: 'disabled', message: '当前版本未配置更新渠道。' })
+    return updateState
+  }
+  publishUpdateState({ status: 'checking' })
+  try {
+    await autoUpdater.checkForUpdates()
+  } catch (error) {
+    publishUpdateState({ status: 'error', message: updateErrorMessage(error) })
+  }
+  return updateState
+}
+
+async function downloadUpdate(): Promise<UpdateState> {
+  if (!updatesEnabled()) {
+    publishUpdateState({ status: 'disabled', message: '当前版本未配置更新渠道。' })
+    return updateState
+  }
+  if (updateState.status !== 'available') return updateState
+  publishUpdateState({ ...updateState, status: 'downloading', progress: 0 })
+  try {
+    await autoUpdater.downloadUpdate()
+  } catch (error) {
+    publishUpdateState({ status: 'error', message: updateErrorMessage(error) })
+  }
+  return updateState
+}
+
+function installUpdate(): void {
+  if (!updatesEnabled() || updateState.status !== 'downloaded') {
+    throw new Error('没有可安装的更新')
+  }
+  autoUpdater.quitAndInstall(false, true)
+}
+
 function registerIpc(): void {
   ipcMain.handle(CHANNELS.selectWorkspace, () => selectWorkspace())
   ipcMain.handle(CHANNELS.openWorkspace, (_event, workspacePath: unknown) => {
@@ -964,6 +1060,10 @@ function registerIpc(): void {
     await shell.trashItem(resolved)
   })
   ipcMain.handle(CHANNELS.search, (_event, query: unknown, options?: SearchOptions) => searchMarkdown(String(query || ''), options || {}))
+  ipcMain.handle(CHANNELS.updateGetState, () => updateState)
+  ipcMain.handle(CHANNELS.updateCheck, () => checkForUpdates())
+  ipcMain.handle(CHANNELS.updateDownload, () => downloadUpdate())
+  ipcMain.handle(CHANNELS.updateInstall, () => installUpdate())
   ipcMain.handle(CHANNELS.listRecent, () => loadRecent())
   ipcMain.handle(CHANNELS.removeRecent, async (_event, workspacePath: unknown) => {
     if (typeof workspacePath !== 'string') throw new Error('Invalid workspace path')
@@ -1009,6 +1109,7 @@ app.disableHardwareAcceleration()
 
 void app.whenReady().then(() => {
   registerIpc()
+  configureAutoUpdater()
   createWindow()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })

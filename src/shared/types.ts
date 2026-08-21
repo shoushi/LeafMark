@@ -116,6 +116,24 @@ export interface SearchResult {
   matchCount: number
 }
 
+export type UpdateStatus =
+  | 'disabled'
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+
+export interface UpdateState {
+  status: UpdateStatus
+  version?: string
+  releaseDate?: string
+  progress?: number
+  message?: string
+}
+
 export interface CreateFileOptions {
   parentPath?: string
   name: string
@@ -194,6 +212,11 @@ export interface MarkdownDesktopAPI {
   rename(options: RenameOptions): Promise<{ path: string; name: string; isDirectory: boolean }>
   trash(path: string): Promise<void>
   search(query: string, options?: SearchOptions): Promise<SearchResult[]>
+  getUpdateState(): Promise<UpdateState>
+  checkForUpdates(): Promise<UpdateState>
+  downloadUpdate(): Promise<UpdateState>
+  installUpdate(): Promise<void>
+  onUpdateState(listener: (state: UpdateState) => void): () => void
   listRecentWorkspaces(): Promise<WorkspaceInfo[]>
   removeRecentWorkspace(path: string): Promise<void>
   onFileChanged(listener: (event: FileChangeEvent) => void): () => void

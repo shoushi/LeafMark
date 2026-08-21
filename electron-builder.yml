@@ -15,3 +15,8 @@ mac:
   target: dmg
 linux:
   target: AppImage
+publish:
+  provider: github
+  owner: shoushi
+  repo: LeafMark
+  releaseType: release

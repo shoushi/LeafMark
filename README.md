@@ -18,6 +18,7 @@ LeafMark 是一个本地优先的桌面 Markdown 编辑器 MVP。文档始终保
 - CodeMirror 6 源码编辑器，支持源码模式下的快捷键、选区和图片附件插入
 - Mermaid 图表和 KaTeX 行内/块级公式渲染（渲染失败时保留源码提示）
 - SQLite 持久化增量搜索索引；运行时提供 FTS5 时使用 FTS5，标准 sql.js WASM 缺少扩展时自动降级为 SQLite 内容索引
+- 可配置的 GitHub Releases 自动更新 IPC 与界面入口（默认关闭，需发布配置启用）
 
 ## 开发
 
@@ -49,9 +50,24 @@ pnpm build
 pnpm package
 ```
 
-Windows 当前可直接使用 `release/LeafMark-0.2.0-win-x64-portable.zip`：解压到任意目录后双击 `LeafMark.exe`。这是免安装版本，不会写入注册表；如需桌面快捷方式可右键创建快捷方式。
+Windows 当前可直接使用 `release/LeafMark-0.3.0-win-x64-portable.zip`：解压到任意目录后双击 `LeafMark.exe`。这是免安装版本，不会写入注册表；如需桌面快捷方式可右键创建快捷方式。
 
 NSIS `.exe` 安装器需要额外下载 Windows 打包工具；在无法访问 GitHub Release 的网络环境中，优先使用上述 portable ZIP。
+
+## 发布与自动更新
+
+应用内已提供“检查更新”入口。只有带有 `app-update.yml` 的已发布构建才会启用更新；开发构建和本地 portable 目录构建会显示为未配置更新渠道，不会访问网络。
+
+GitHub Releases 发布需要仓库写入令牌，签名则需要代码签名证书。不要把令牌或证书提交到仓库：
+
+```powershell
+$env:GH_TOKEN = '只在当前会话设置的 GitHub token'
+$env:CSC_LINK = '证书文件路径或受支持的证书 URL'
+$env:CSC_KEY_PASSWORD = '证书密码'
+pnpm release:win
+```
+
+没有证书时可以执行 `pnpm package:win` 生成未签名 NSIS 安装器；没有 `GH_TOKEN` 时不会上传 Release。
 
 如 Electron 下载受网络限制，可设置镜像：
 
@@ -71,5 +87,5 @@ pnpm rebuild electron
 ## 后续阶段
 
 - Milkdown/ProseMirror 无损块级编辑内核（当前 WYSIWYG 仍使用受限 HTML → Markdown 序列化）
-- Windows/macOS/Linux 代码签名、发布渠道和自动更新
+- Windows/macOS/Linux 代码签名证书和 CI 发布流水线
 - 将 SQLite FTS5 放入自定义 WASM 构建，减少中文搜索的全表候选扫描

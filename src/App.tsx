@@ -10,6 +10,7 @@ import type {
   SearchResult,
   WorkspaceDirectoryInfo,
   WorkspaceInfo,
+  UpdateState,
 } from './shared/types'
 import './ui/app.css'
 
@@ -77,6 +78,7 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyBusy, setHistoryBusy] = useState(false)
   const [historyError, setHistoryError] = useState('')
+  const [updateState, setUpdateState] = useState<UpdateState>({ status: 'disabled' })
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
 
@@ -256,6 +258,20 @@ export default function App() {
     })
   }, [refreshDirectories, refreshFiles])
 
+  useEffect(() => {
+    let active = true
+    void window.markdownDesktop.getUpdateState().then((state) => {
+      if (active) setUpdateState(state)
+    }).catch(() => undefined)
+    const unsubscribe = window.markdownDesktop.onUpdateState((state) => {
+      if (active) setUpdateState(state)
+    })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
+
   useEffect(() => window.markdownDesktop.onFileChanged((event: FileChangeEvent) => {
     void refreshFiles()
     if (event.type !== 'change' && event.type !== 'unlink') return
@@ -335,6 +351,28 @@ export default function App() {
       .finally(() => setDirectoriesLoading(false))
   }
 
+  const updateAction = async (): Promise<void> => {
+    try {
+      if (updateState.status === 'available') {
+        await window.markdownDesktop.downloadUpdate()
+      } else if (updateState.status === 'downloaded') {
+        await window.markdownDesktop.installUpdate()
+      } else {
+        await window.markdownDesktop.checkForUpdates()
+      }
+    } catch (error) {
+      setMessage(`更新失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  const updateButtonLabel = updateState.status === 'available'
+    ? '下载更新'
+    : updateState.status === 'downloaded'
+      ? '重启安装'
+      : updateState.status === 'checking' || updateState.status === 'downloading'
+        ? '检查更新中…'
+        : '检查更新'
+
   const closeCreateDialog = () => {
     if (createBusy) return
     setCreateDialog(null)
@@ -408,6 +446,15 @@ export default function App() {
           <button onClick={() => setFocusMode((value) => !value)}>专注</button>
           <button onClick={() => setTheme((value) => value === 'light' ? 'dark' : 'light')}>
             {theme === 'light' ? '深色' : '浅色'}
+          </button>
+          <button
+            className="update-action"
+            onClick={() => void updateAction()}
+            disabled={updateState.status === 'disabled' || updateState.status === 'checking' || updateState.status === 'downloading'}
+            title={updateState.message || '检查 LeafMark 更新'}
+          >
+            {updateButtonLabel}
+            {updateState.status === 'downloading' && updateState.progress !== undefined ? ` ${Math.round(updateState.progress)}%` : ''}
           </button>
         </div>
       </header>

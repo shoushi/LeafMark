@@ -1,6 +1,6 @@
 {
   "name": "leafmark",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "LeafMark — a local-first Markdown desktop editor",
   "main": "dist-electron/electron/main.js",
@@ -10,7 +10,10 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "build": "npm run build:renderer && npm run build:electron",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
-    "package": "npm run build && electron-builder"
+    "package": "npm run build && electron-builder",
+    "package:dir": "npm run build && electron-builder --win dir",
+    "package:win": "npm run build && electron-builder --win nsis",
+    "release:win": "npm run build && electron-builder --win nsis --publish always"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",
@@ -19,6 +22,7 @@
     "@codemirror/view": "^6.43.9",
     "codemirror": "^6.0.2",
     "dompurify": "^3.2.6",
+    "electron-updater": "^6.8.9",
     "katex": "^0.18.4",
     "marked": "^15.0.7",
     "mermaid": "^11.17.0",
