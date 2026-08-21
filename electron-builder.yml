@@ -2,6 +2,7 @@ appId: com.leafmark.desktop
 productName: LeafMark
 directories:
   output: release
+  buildResources: build
 files:
   - dist/**
   - dist-electron/**
@@ -10,7 +11,10 @@ asar: true
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 win:
   target: nsis
-  icon: build/icon/leafmark.ico
+  # icon is resolved relative to directories.buildResources (the build/ folder).
+  icon: icon.ico
+  # The local build environment cannot download winCodeSign; the post-package
+  # script embeds the icon resources without requiring code-signing tools.
   signAndEditExecutable: false
 mac:
   target: dmg

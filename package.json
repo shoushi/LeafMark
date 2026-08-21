@@ -11,9 +11,9 @@
     "build": "npm run build:renderer && npm run build:electron",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "package": "npm run build && electron-builder",
-    "package:dir": "npm run build && electron-builder --win dir",
-    "package:win": "npm run build && electron-builder --win nsis",
-    "release:win": "npm run build && electron-builder --win nsis --publish always"
+    "package:dir": "npm run build && electron-builder --win dir && node scripts/embed-windows-icon.mjs",
+    "package:win": "npm run build && electron-builder --win dir && node scripts/embed-windows-icon.mjs && electron-builder --win nsis --prepackaged release/win-unpacked",
+    "release:win": "npm run build && electron-builder --win dir && node scripts/embed-windows-icon.mjs && electron-builder --win nsis --prepackaged release/win-unpacked --publish always"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",
