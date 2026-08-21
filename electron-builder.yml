@@ -10,6 +10,7 @@ asar: true
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 win:
   target: nsis
+  icon: build/icon/leafmark.ico
   signAndEditExecutable: false
 mac:
   target: dmg
