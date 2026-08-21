@@ -32,6 +32,7 @@ import type {
   WorkspaceInfo,
 } from '../src/shared/types'
 import { mergeThreeWay } from '../src/shared/merge'
+import { closeSearchIndex, searchIndexed } from './searchIndex'
 
 const CHANNELS = {
   selectWorkspace: 'workspace:select',
@@ -717,7 +718,7 @@ async function renamePath(options: RenameOptions): Promise<{ path: string; name:
   return { path: destination, name: path.basename(destination), isDirectory: sourceStat.isDirectory() }
 }
 
-async function searchMarkdown(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
+async function searchMarkdownLegacy(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
   const needle = String(query || '')
   if (!needle) return []
   const files = await listMarkdownFiles()
@@ -755,6 +756,11 @@ async function searchMarkdown(query: string, options: SearchOptions = {}): Promi
     if (results.length >= limit) break
   }
   return results
+}
+
+async function searchMarkdown(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
+  if (!currentWorkspace || !String(query || '').trim()) return []
+  return searchIndexed(currentWorkspace.path, await listMarkdownFiles(), query, options)
 }
 
 function recentFile(): string {
@@ -865,6 +871,7 @@ async function setWorkspace(workspacePath: string): Promise<WorkspaceInfo> {
   const real = await fs.realpath(path.resolve(workspacePath))
   if (!(await fs.stat(real)).isDirectory()) throw new Error('Workspace must be a directory')
   await closeWatcher()
+  await closeSearchIndex()
   currentWorkspace = { path: real, name: path.basename(real) || real }
   try {
     await rememberWorkspace(currentWorkspace)
@@ -1010,4 +1017,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => { void closeWatcher() })
+app.on('before-quit', () => { void closeWatcher(); void closeSearchIndex() })

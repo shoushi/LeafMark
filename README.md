@@ -15,6 +15,9 @@ LeafMark 是一个本地优先的桌面 Markdown 编辑器 MVP。文档始终保
 - 图片粘贴/拖放到工作区 `attachments/`，自动插入 Markdown 引用
 - 保存前历史快照、历史恢复和行级三方冲突合并
 - Markdown/HTML 导出
+- CodeMirror 6 源码编辑器，支持源码模式下的快捷键、选区和图片附件插入
+- Mermaid 图表和 KaTeX 行内/块级公式渲染（渲染失败时保留源码提示）
+- SQLite 持久化增量搜索索引；运行时提供 FTS5 时使用 FTS5，标准 sql.js WASM 缺少扩展时自动降级为 SQLite 内容索引
 
 ## 开发
 
@@ -67,6 +70,6 @@ pnpm rebuild electron
 
 ## 后续阶段
 
-- CodeMirror 6 源码编辑器与 Milkdown/ProseMirror 无损编辑内核
-- SQLite FTS5 增量索引、Mermaid、KaTeX
-- Windows/macOS/Linux 签名与自动更新
+- Milkdown/ProseMirror 无损块级编辑内核（当前 WYSIWYG 仍使用受限 HTML → Markdown 序列化）
+- Windows/macOS/Linux 代码签名、发布渠道和自动更新
+- 将 SQLite FTS5 放入自定义 WASM 构建，减少中文搜索的全表候选扫描

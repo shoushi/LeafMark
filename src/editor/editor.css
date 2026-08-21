@@ -206,6 +206,40 @@
   tab-size: 2;
 }
 
+.markdown-editor__codemirror {
+  min-height: 100%;
+  height: 100%;
+  overflow: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.markdown-editor__codemirror .cm-editor {
+  min-height: 100%;
+  height: 100%;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.markdown-editor__codemirror .cm-scroller {
+  min-height: 100%;
+  padding: 32px clamp(20px, 8vw, 120px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  line-height: 1.65;
+}
+
+.markdown-editor__codemirror .cm-gutters {
+  border: 0;
+  background: #0f172a;
+  color: #64748b;
+}
+
+.markdown-editor__codemirror .cm-activeLine,
+.markdown-editor__codemirror .cm-activeLineGutter {
+  background: rgb(51 65 85 / 38%);
+}
+
 .markdown-editor__source::selection {
   background: #334155;
 }
@@ -270,6 +304,32 @@
 .markdown-editor__reader img {
   max-width: 100%;
   height: auto;
+}
+
+.markdown-editor [data-leafmark-mermaid] {
+  margin: 1.2em 0;
+  overflow: auto;
+  text-align: center;
+}
+
+.markdown-editor [data-leafmark-mermaid] svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-editor [data-leafmark-katex][data-display='true'] {
+  display: block;
+  margin: 1em 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.markdown-editor [data-render-error='true']::after {
+  content: '渲染失败，已保留原始内容';
+  display: block;
+  margin-top: 6px;
+  color: #b45309;
+  font-size: 12px;
 }
 
 .markdown-editor__reader input[type='checkbox'] {

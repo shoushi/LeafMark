@@ -10,7 +10,10 @@ import React, {
 } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import 'katex/dist/katex.min.css'
+import { EditorView } from '@codemirror/view'
 import type { ExportDocumentFormat, ExportDocumentResult } from '../shared/types'
+import { CodeMirrorSourceEditor } from './CodeMirrorSourceEditor'
 
 import './editor.css'
 
@@ -64,8 +67,29 @@ function sanitizeHtml(html: string): string {
   })
 }
 
+function encodeRichValue(value: string): string {
+  return encodeURIComponent(value).replace(/'/g, '%27')
+}
+
+function protectRichSyntax(source: string): string {
+  const mermaidBlocks: string[] = []
+  const withoutMermaid = source.replace(/```([^\n]*)\n([\s\S]*?)```/g, (full, language: string, body: string) => {
+    if (language.trim().toLowerCase() !== 'mermaid') return full
+    const index = mermaidBlocks.push(body.replace(/\n$/, '')) - 1
+    return `\n<div data-leafmark-mermaid="${encodeRichValue(mermaidBlocks[index])}"></div>\n`
+  })
+  return withoutMermaid.replace(/(`[^`\n]+`)|(\$\$[\s\S]+?\$\$)|(\$(?!\s)(?:\\.|[^$\n])+\$)/g, (full, code: string, blockMath: string, inlineMath: string) => {
+    if (code) return full
+    const display = Boolean(blockMath)
+    const expression = (blockMath || inlineMath).replace(/^\$\$?|\$\$?$/g, '').trim()
+    return display
+      ? `\n<div data-leafmark-katex="${encodeRichValue(expression)}" data-display="true"></div>\n`
+      : `<span data-leafmark-katex="${encodeRichValue(expression)}"></span>`
+  })
+}
+
 function markdownToHtml(source: string): string {
-  const html = marked.parse(source, { gfm: true, breaks: false })
+  const html = marked.parse(protectRichSyntax(source), { gfm: true, breaks: false })
   return sanitizeHtml(typeof html === 'string' ? html : '')
 }
 
@@ -91,6 +115,63 @@ async function hydrateLocalImages(container: HTMLElement, markdownPath: string):
       image.dataset.imageError = 'true'
     }
   }))
+}
+
+let mermaidConfigured = false
+let richRenderId = 0
+let mermaidModulePromise: Promise<typeof import('mermaid')> | null = null
+let katexModulePromise: Promise<typeof import('katex')> | null = null
+
+async function loadMermaid(): Promise<typeof import('mermaid')> {
+  mermaidModulePromise ??= import('mermaid')
+  return mermaidModulePromise
+}
+
+async function loadKatex(): Promise<typeof import('katex')> {
+  katexModulePromise ??= import('katex')
+  return katexModulePromise
+}
+
+async function hydrateRichContent(container: HTMLElement): Promise<void> {
+  const mermaidNodes = Array.from(container.querySelectorAll<HTMLElement>('[data-leafmark-mermaid]'))
+  if (mermaidNodes.length) {
+    const mermaidModule = await loadMermaid()
+    const mermaid = mermaidModule.default
+    if (!mermaidConfigured) {
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
+      mermaidConfigured = true
+    }
+    for (const node of mermaidNodes) {
+      try {
+        const source = decodeURIComponent(node.dataset.leafmarkMermaid ?? '')
+        const rendered = await mermaid.render(`leafmark-mermaid-${++richRenderId}`, source)
+        node.innerHTML = DOMPurify.sanitize(rendered.svg, { USE_PROFILES: { html: true, svg: true, svgFilters: true } })
+        node.removeAttribute('data-render-error')
+      } catch {
+        node.textContent = decodeURIComponent(node.dataset.leafmarkMermaid ?? '')
+        node.dataset.renderError = 'true'
+      }
+    }
+  }
+
+  const katexNodes = Array.from(container.querySelectorAll<HTMLElement>('[data-leafmark-katex]'))
+  if (!katexNodes.length) return
+  const katex = (await loadKatex()).default
+  for (const node of katexNodes) {
+    try {
+      const expression = decodeURIComponent(node.dataset.leafmarkKatex ?? '')
+      const rendered = katex.renderToString(expression, {
+        displayMode: node.dataset.display === 'true',
+        throwOnError: false,
+        output: 'htmlAndMathml',
+      })
+      node.innerHTML = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true, svg: true } })
+      node.removeAttribute('data-render-error')
+    } catch {
+      node.textContent = decodeURIComponent(node.dataset.leafmarkKatex ?? '')
+      node.dataset.renderError = 'true'
+    }
+  }
 }
 
 function inlineMarkdown(node: Node): string {
@@ -256,7 +337,7 @@ export function MarkdownEditor({
   className = '',
 }: MarkdownEditorProps): React.ReactElement {
   const editableRef = useRef<HTMLDivElement>(null)
-  const sourceRef = useRef<HTMLTextAreaElement>(null)
+  const sourceViewRef = useRef<EditorView | null>(null)
   const readerRef = useRef<HTMLElement>(null)
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
@@ -302,10 +383,11 @@ export function MarkdownEditor({
     const container = mode === 'wysiwyg' ? editableRef.current : mode === 'reader' ? readerRef.current : null
     if (!container) return
     void hydrateLocalImages(container, filePath)
+    void hydrateRichContent(container)
   }, [filePath, html, mode])
 
   useEffect(() => {
-    if (mode === 'source') sourceRef.current?.focus()
+    if (mode === 'source') sourceViewRef.current?.focus()
   }, [mode])
 
   const emitCommand = (command: MarkdownEditorCommand): void => {
@@ -375,27 +457,28 @@ export function MarkdownEditor({
 
       if (mode === 'source') {
         const currentValue = valueRef.current
-        const currentSelection = sourceRef.current
+        const currentSelection = sourceViewRef.current?.state.selection.main
         const selection = currentValue === sourceSelection?.value && sourceSelection
           ? sourceSelection
           : {
             value: currentValue,
-            start: currentSelection?.selectionStart ?? currentValue.length,
-            end: currentSelection?.selectionEnd ?? currentValue.length,
+            start: currentSelection?.from ?? currentValue.length,
+            end: currentSelection?.to ?? currentValue.length,
           }
         const inserted = attachments.map(({ attachment }) => attachment.markdown).join('\n')
         const start = Math.max(0, Math.min(selection.start, selection.value.length))
         const end = Math.max(start, Math.min(selection.end, selection.value.length))
         const nextValue = `${selection.value.slice(0, start)}${inserted}${selection.value.slice(end)}`
         valueRef.current = nextValue
-        onChangeRef.current(nextValue)
-        window.requestAnimationFrame(() => {
-          const textarea = sourceRef.current
-          if (!textarea) return
-          textarea.focus()
-          const cursor = start + inserted.length
-          textarea.setSelectionRange(cursor, cursor)
-        })
+        if (sourceViewRef.current) {
+          sourceViewRef.current.dispatch({
+            changes: { from: start, to: end, insert: inserted },
+            selection: { anchor: start + inserted.length },
+          })
+          sourceViewRef.current.focus()
+        } else {
+          onChangeRef.current(nextValue)
+        }
       } else if (editableRef.current) {
         const editable = editableRef.current
         const range = wysiwygSelection && editable.contains(wysiwygSelection.commonAncestorContainer)
@@ -438,11 +521,11 @@ export function MarkdownEditor({
     const files = imageFilesFromTransfer(event.clipboardData)
     if (!files.length) return
     event.preventDefault()
-    const sourceSelection = mode === 'source' && sourceRef.current
+    const sourceSelection = mode === 'source' && sourceViewRef.current
       ? {
-        value: sourceRef.current.value,
-        start: sourceRef.current.selectionStart,
-        end: sourceRef.current.selectionEnd,
+        value: sourceViewRef.current?.state.doc.toString() ?? valueRef.current,
+        start: sourceViewRef.current?.state.selection.main.from ?? valueRef.current.length,
+        end: sourceViewRef.current?.state.selection.main.to ?? valueRef.current.length,
       }
       : undefined
     const selection = mode === 'wysiwyg' ? window.getSelection() : null
@@ -462,11 +545,11 @@ export function MarkdownEditor({
     const files = imageFilesFromTransfer(event.dataTransfer)
     if (!files.length) return
     event.preventDefault()
-    const sourceSelection = mode === 'source' && sourceRef.current
+    const sourceSelection = mode === 'source' && sourceViewRef.current
       ? {
-        value: sourceRef.current.value,
-        start: sourceRef.current.selectionStart,
-        end: sourceRef.current.selectionEnd,
+        value: sourceViewRef.current?.state.doc.toString() ?? valueRef.current,
+        start: sourceViewRef.current?.state.selection.main.from ?? valueRef.current.length,
+        end: sourceViewRef.current?.state.selection.main.to ?? valueRef.current.length,
       }
       : undefined
     const selection = mode === 'wysiwyg' ? window.getSelection() : null
@@ -559,15 +642,12 @@ export function MarkdownEditor({
           />
         )}
         {mode === 'source' && (
-          <textarea
-            ref={sourceRef}
-            className="markdown-editor__source"
+          <CodeMirrorSourceEditor
             value={value}
+            onChange={(next) => onChangeRef.current(next)}
             readOnly={readOnly}
             placeholder={placeholder}
-            spellCheck
-            onChange={(event) => onChangeRef.current(event.target.value)}
-            aria-label="Markdown 源码"
+            viewRef={sourceViewRef}
           />
         )}
         {mode === 'reader' && (
