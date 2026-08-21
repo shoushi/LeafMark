@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">LeafMark</title>
+  <desc id="desc">A leaf growing from a folded Markdown page</desc>
+  <defs>
+    <linearGradient id="background" x1="18" y1="12" x2="112" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5b9b7a"/>
+      <stop offset="1" stop-color="#2f624d"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="31" y1="86" x2="68" y2="35" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b9e3c9"/>
+      <stop offset="1" stop-color="#f0f8dd"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#background)"/>
+  <path d="M69 22h29l18 18v61a7 7 0 0 1-7 7H69a7 7 0 0 1-7-7V29a7 7 0 0 1 7-7Z" fill="#f7fbf4" opacity=".97"/>
+  <path d="M98 22v18h18" fill="#dceee0"/>
+  <path d="M98 22v18h18" fill="none" stroke="#b7d9c0" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M73 55h27M73 66h27M73 77h18" stroke="#5b9b7a" stroke-width="5" stroke-linecap="round"/>
+  <path d="M31 91c1-22 13-39 37-51 2 22-5 40-23 51-5 3-10 3-14 0Z" fill="url(#leaf)"/>
+  <path d="M30 98c12-18 25-33 39-45" fill="none" stroke="#eff8df" stroke-width="4" stroke-linecap="round"/>
+  <path d="M31 91c-5-9-4-18 3-27 9 3 15 9 17 17" fill="#91cfaa" opacity=".9"/>
+</svg>

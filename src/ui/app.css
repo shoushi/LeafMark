@@ -17,8 +17,7 @@ button { color: inherit; }
 .app-shell { height: 100%; display: grid; grid-template-rows: 48px minmax(0, 1fr) 26px; background: var(--bg); color: var(--text); }
 .titlebar { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; letter-spacing: .2px; }
-.brand span, .welcome-mark { display: grid; place-items: center; background: var(--accent); color: white; border-radius: 9px; }
-.brand span { width: 28px; height: 28px; }
+.brand-logo { width: 28px; height: 28px; display: block; border-radius: 8px; }
 .title-actions { display: flex; gap: 6px; }
 .title-actions button, .welcome button, .conflict-banner button { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 6px 10px; cursor: pointer; }
 .title-actions button:hover, .conflict-banner button:hover { background: var(--hover); }
@@ -44,7 +43,7 @@ button { color: inherit; }
 .document-panel > .markdown-editor { flex: 1; min-height: 0; }
 .conflict-banner { display: flex; align-items: center; gap: 8px; padding: 7px 12px; color: #704f00; background: #fff1bd; border-bottom: 1px solid #e5cf79; font-size: 13px; }
 .welcome { margin: auto; max-width: 520px; padding: 48px; text-align: center; color: var(--muted); }
-.welcome-mark { width: 64px; height: 64px; margin: 0 auto 22px; font-size: 30px; }.welcome h1 { color: var(--text); font-weight: 650; }
+.welcome-mark { display: block; width: 64px; height: 64px; margin: 0 auto 22px; border-radius: 16px; }.welcome h1 { color: var(--text); font-weight: 650; }
 .welcome button { margin-top: 16px; background: var(--accent); color: white; border-color: var(--accent); padding: 9px 18px; }
 .right-panel h3 { margin: 4px 0 14px; font-size: 13px; }.outline-item { width: 100%; display: block; padding-top: 5px; padding-bottom: 5px; border: 0; border-radius: 6px; background: transparent; color: var(--text); text-align: left; font-size: 13px; cursor: pointer; }.outline-item:hover { background: var(--hover); color: var(--accent); }.outline-item small, .muted { color: var(--muted); }
 .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 0 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); background: var(--panel); }

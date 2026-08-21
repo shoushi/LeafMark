@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MarkdownEditor, type MarkdownEditorMode } from './editor'
+import logoUrl from './assets/leafmark-logo.svg'
 import type {
   FileChangeEvent,
   ExportDocumentFormat,
@@ -444,7 +445,7 @@ export default function App() {
   return (
     <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
       <header className="titlebar">
-        <div className="brand"><span>叶</span> LeafMark</div>
+        <div className="brand"><img className="brand-logo" src={logoUrl} alt="" aria-hidden="true" /> LeafMark</div>
         <div className="title-actions">
           <button onClick={() => void openWorkspace()}>打开工作区</button>
           <button onClick={() => openCreateDialog('file')} disabled={!workspace}>新建</button>
@@ -528,7 +529,7 @@ export default function App() {
             </>
           ) : (
             <div className="welcome">
-              <div className="welcome-mark">叶</div>
+              <img className="welcome-mark" src={logoUrl} alt="LeafMark" />
               <h1>写作，留在你的文件里</h1>
               <p>打开一个 Markdown 工作区，开始本地优先的编辑与阅读。</p>
               <button onClick={() => void openWorkspace()}>选择文件夹</button>
