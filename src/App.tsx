@@ -79,6 +79,7 @@ export default function App() {
   const [historyBusy, setHistoryBusy] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'disabled' })
+  const [outlineNavigation, setOutlineNavigation] = useState<{ path: string; line: number; token: number } | null>(null)
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
 
@@ -373,6 +374,11 @@ export default function App() {
         ? '检查更新中…'
         : '检查更新'
 
+  const navigateToOutline = (line: number): void => {
+    if (!activeTab) return
+    setOutlineNavigation((current) => ({ path: activeTab.path, line, token: (current?.token ?? 0) + 1 }))
+  }
+
   const closeCreateDialog = () => {
     if (createBusy) return
     setCreateDialog(null)
@@ -515,6 +521,7 @@ export default function App() {
                 mode={mode}
                 onModeChange={setMode}
                 filePath={activeTab.path}
+                outlineNavigation={outlineNavigation?.path === activeTab.path ? outlineNavigation : null}
                 onSave={() => saveTab(activeTab.path)}
                 onExport={(format) => exportTab(activeTab.path, format)}
               />
@@ -532,9 +539,16 @@ export default function App() {
         <aside className="right-panel">
           <h3>文档大纲</h3>
           {outline.length ? outline.map((heading) => (
-            <div className="outline-item" style={{ paddingLeft: `${(heading.level - 1) * 12}px` }} key={`${heading.line}-${heading.title}`}>
+            <button
+              type="button"
+              className="outline-item"
+              style={{ paddingLeft: `${(heading.level - 1) * 12}px` }}
+              key={`${heading.line}-${heading.title}`}
+              onClick={() => navigateToOutline(heading.line)}
+              title={`跳转到第 ${heading.line} 行`}
+            >
               {heading.title}<small> L{heading.line}</small>
-            </div>
+            </button>
           )) : <p className="muted">暂无标题</p>}
         </aside>
       </main>

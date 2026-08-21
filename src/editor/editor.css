@@ -332,6 +332,18 @@
   font-size: 12px;
 }
 
+.markdown-editor .outline-target {
+  outline: 2px solid var(--editor-accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+  animation: outline-target-pulse 1.2s ease-out;
+}
+
+@keyframes outline-target-pulse {
+  from { background: rgb(37 99 235 / 18%); }
+  to { background: transparent; }
+}
+
 .markdown-editor__reader input[type='checkbox'] {
   margin-right: 0.45em;
 }

@@ -35,6 +35,7 @@ export interface MarkdownEditorProps {
   onSave?: () => void | Promise<void>
   onExport?: (format: ExportDocumentFormat) => ExportDocumentResult | null | void | Promise<ExportDocumentResult | null | void>
   onCommand?: (command: MarkdownEditorCommand) => void
+  outlineNavigation?: { path: string; line: number; token: number } | null
   readOnly?: boolean
   placeholder?: string
   className?: string
@@ -350,6 +351,7 @@ export function MarkdownEditor({
   onSave,
   onExport,
   onCommand,
+  outlineNavigation,
   readOnly = false,
   placeholder = '开始输入 Markdown…',
   className = '',
@@ -407,6 +409,34 @@ export function MarkdownEditor({
   useEffect(() => {
     if (mode === 'source') sourceViewRef.current?.focus()
   }, [mode])
+
+  useEffect(() => {
+    if (!outlineNavigation || !Number.isFinite(outlineNavigation.line)) return
+    const targetLine = Math.max(1, Math.floor(outlineNavigation.line))
+    const lines = valueRef.current.split(/\r?\n/)
+    const offset = lines.slice(0, targetLine - 1).reduce((total, line) => total + line.length + 1, 0)
+    if (mode === 'source') {
+      const view = sourceViewRef.current
+      if (!view) return
+      const anchor = Math.min(offset, view.state.doc.length)
+      view.dispatch({ selection: { anchor }, scrollIntoView: true })
+      view.focus()
+      return
+    }
+
+    const container = mode === 'wysiwyg' ? editableRef.current : readerRef.current
+    if (!container) return
+    const headingLines = lines.flatMap((line, index) => /^(#{1,6})\s+(.+)$/.test(line) ? [index + 1] : [])
+    const headingIndex = headingLines.indexOf(targetLine)
+    if (headingIndex < 0) return
+    const headings = Array.from(container.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))
+    const heading = headings[headingIndex]
+    if (!heading) return
+    heading.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    heading.classList.add('outline-target')
+    const clearTarget = window.setTimeout(() => heading.classList.remove('outline-target'), 1200)
+    return () => window.clearTimeout(clearTarget)
+  }, [mode, outlineNavigation])
 
   const emitCommand = (command: MarkdownEditorCommand): void => {
     onCommandRef.current?.(command)
