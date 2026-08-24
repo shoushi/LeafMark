@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MarkdownEditor, type MarkdownEditorMode } from './editor'
 import logoUrl from './assets/leafmark-logo.svg'
 import type {
@@ -80,7 +80,14 @@ export default function App() {
   const [historyBusy, setHistoryBusy] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'disabled' })
-  const [outlineNavigation, setOutlineNavigation] = useState<{ path: string; line: number; token: number } | null>(null)
+  const [outlineNavigation, setOutlineNavigation] = useState<{
+    path: string
+    line: number
+    column?: number
+    query?: string
+    token: number
+  } | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
 
@@ -296,6 +303,16 @@ export default function App() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        event.stopPropagation()
+        setFocusMode(false)
+        window.requestAnimationFrame(() => {
+          searchInputRef.current?.focus()
+          searchInputRef.current?.select()
+        })
+        return
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && activePath) {
         event.preventDefault()
         void saveTab(activePath)
@@ -305,19 +322,28 @@ export default function App() {
         void openWorkspace()
       }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
   }, [activePath, openWorkspace, saveTab])
 
   useEffect(() => {
-    if (!query.trim()) {
+    const searchQuery = query.trim()
+    if (!searchQuery) {
       setResults([])
       return
     }
+    let cancelled = false
     const timer = window.setTimeout(() => {
-      void window.markdownDesktop.search(query, { maxResults: 50 }).then(setResults)
+      void window.markdownDesktop.search(searchQuery, { maxResults: 50 }).then((next) => {
+        if (!cancelled) setResults(next)
+      }).catch(() => {
+        if (!cancelled) setResults([])
+      })
     }, 250)
-    return () => window.clearTimeout(timer)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
   }, [query])
 
   const outline = useMemo(() => {
@@ -378,6 +404,18 @@ export default function App() {
   const navigateToOutline = (line: number): void => {
     if (!activeTab) return
     setOutlineNavigation((current) => ({ path: activeTab.path, line, token: (current?.token ?? 0) + 1 }))
+  }
+
+  const openSearchResult = async (result: SearchResult): Promise<void> => {
+    setMode('source')
+    await openFile(result.path)
+    setOutlineNavigation((current) => ({
+      path: result.path,
+      line: result.line,
+      column: result.column,
+      query: query.trim(),
+      token: (current?.token ?? 0) + 1,
+    }))
   }
 
   const closeCreateDialog = () => {
@@ -470,24 +508,34 @@ export default function App() {
         <aside className="left-panel">
           <div className="workspace-name">{workspace?.name ?? '尚未打开工作区'}</div>
           <input
+            ref={searchInputRef}
             className="search-input"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索文档…"
           />
           <div className="file-list">
-            {(query ? results : files).map((item) => {
+            {(query.trim() ? results : files).map((item) => {
               const file = 'relativePath' in item ? item : null
+              const result = 'line' in item ? item : null
               const path = item.path
               return (
                 <button
                   className={`file-item ${activePath === path ? 'active' : ''}`}
-                  key={`${path}-${'line' in item ? item.line : ''}`}
-                  onClick={() => void openFile(path)}
-                  title={file?.relativePath ?? path}
+                  key={`${path}-${result ? `${result.line}-${result.column}` : ''}`}
+                  onClick={() => result ? void openSearchResult(result) : void openFile(path)}
+                  title={result
+                    ? `${result.relativePath} · 第 ${result.line} 行，第 ${result.column} 列`
+                    : file?.relativePath ?? path}
                 >
                   <span className="file-icon">MD</span>
-                  <span><b>{basename(path)}</b><small>{'preview' in item ? item.preview : file?.relativePath}</small></span>
+                  <span>
+                    <b>{basename(path)}</b>
+                    <small>{result
+                      ? `${result.relativePath} · L${result.line}:C${result.column} · ${result.matchCount} 处`
+                      : file?.relativePath}</small>
+                    {result && <small className="search-result-preview">{result.preview}</small>}
+                  </span>
                 </button>
               )
             })}
