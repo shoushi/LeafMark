@@ -9,6 +9,18 @@ files:
   - package.json
 asar: true
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+fileAssociations:
+  - ext:
+      - md
+      - markdown
+      - mdown
+      - mkdn
+      - mkd
+      - mdwn
+    name: Markdown Document
+    description: Markdown document
+    role: Editor
+    icon: icon.ico
 win:
   target: nsis
   # icon is resolved relative to directories.buildResources (the build/ folder).

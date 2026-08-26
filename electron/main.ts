@@ -19,6 +19,7 @@ import type {
   MarkdownDocument,
   MarkdownFileInfo,
   MergeFileResult,
+  OpenFileRequest,
   RenameOptions,
   SaveFileOptions,
   SavedFileResult,
@@ -64,6 +65,8 @@ const CHANNELS = {
   updateDownload: 'update:download',
   updateInstall: 'update:install',
   fileChanged: 'workspace:file-changed',
+  openFileRequested: 'file:open-requested',
+  consumeOpenFileRequest: 'file:consume-open-request',
 } as const
 
 const MARKDOWN_EXTENSIONS = new Set([
@@ -114,6 +117,25 @@ let nativeWatcher: FSWatcher | null = null
 const fallbackWatchers = new Map<string, FSWatcher>()
 let watcherGeneration = 0
 let updateState: UpdateState = { status: 'disabled', message: '当前版本未配置更新渠道。' }
+let pendingOpenFilePath: string | null = null
+
+function markdownArgument(argv: string[]): string | null {
+  for (const argument of argv) {
+    if (!argument || argument.startsWith('-') || !markdownPath(argument)) continue
+    return path.resolve(argument)
+  }
+  return null
+}
+
+function queueOpenFile(filePath: string): void {
+  if (!markdownPath(filePath)) return
+  pendingOpenFilePath = path.resolve(filePath)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.webContents.send(CHANNELS.openFileRequested)
+  }
+}
 
 function markdownPath(filePath: string): boolean {
   return MARKDOWN_EXTENSIONS.has(path.extname(filePath).toLowerCase())
@@ -890,6 +912,27 @@ async function setWorkspace(workspacePath: string): Promise<WorkspaceInfo> {
   return currentWorkspace
 }
 
+async function consumeOpenFileRequest(): Promise<OpenFileRequest | null> {
+  const requestedPath = pendingOpenFilePath
+  pendingOpenFilePath = null
+  if (!requestedPath) return null
+
+  const real = await fs.realpath(path.resolve(requestedPath))
+  if (!markdownPath(real) || !(await fs.stat(real)).isFile()) {
+    throw new Error('Requested file must be an existing Markdown document')
+  }
+  const relativeToCurrent = currentWorkspace ? path.relative(currentWorkspace.path, real) : '..'
+  const isInCurrentWorkspace = Boolean(currentWorkspace)
+    && relativeToCurrent !== '..'
+    && !relativeToCurrent.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relativeToCurrent)
+  const workspace = isInCurrentWorkspace && currentWorkspace
+    ? currentWorkspace
+    : await setWorkspace(path.dirname(real))
+  const document = await readMarkdownFile(real)
+  return { workspace, document }
+}
+
 async function selectWorkspace(): Promise<WorkspaceInfo | null> {
   const options: OpenDialogOptions = { properties: ['openDirectory', 'createDirectory'] }
   const result = mainWindow
@@ -1073,6 +1116,7 @@ function registerIpc(): void {
     if (typeof url !== 'string') throw new Error('Invalid URL')
     return openExternal(url)
   })
+  ipcMain.handle(CHANNELS.consumeOpenFileRequest, () => consumeOpenFileRequest())
 }
 
 function createWindow(): void {
@@ -1107,12 +1151,33 @@ function createWindow(): void {
 
 app.disableHardwareAcceleration()
 
-void app.whenReady().then(() => {
-  registerIpc()
-  configureAutoUpdater()
-  createWindow()
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
-})
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  const initialFilePath = markdownArgument(process.argv)
+  if (initialFilePath) queueOpenFile(initialFilePath)
+
+  app.on('second-instance', (_event, argv) => {
+    const filePath = markdownArgument(argv)
+    if (filePath) queueOpenFile(filePath)
+    else if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault()
+    queueOpenFile(filePath)
+  })
+
+  void app.whenReady().then(() => {
+    registerIpc()
+    configureAutoUpdater()
+    createWindow()
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+  })
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

@@ -88,6 +88,8 @@ export default function App() {
     token: number
   } | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const workspaceRef = useRef(workspace)
+  workspaceRef.current = workspace
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
 
@@ -127,6 +129,31 @@ export default function App() {
       setBusy(false)
     }
   }, [tabs])
+
+  const consumeOpenFileRequest = useCallback(async () => {
+    setBusy(true)
+    try {
+      const request = await window.markdownDesktop.consumeOpenFileRequest()
+      if (!request) return
+
+      const workspaceChanged = workspaceRef.current?.path !== request.workspace.path
+      const nextTab: Tab = { ...request.document, draft: request.document.content, dirty: false }
+      setWorkspace(request.workspace)
+      setTabs((current) => {
+        if (workspaceChanged) return [nextTab]
+        return current.some((tab) => tab.path === nextTab.path) ? current : [...current, nextTab]
+      })
+      setActivePath(request.document.path)
+      setQuery('')
+      setResults([])
+      await Promise.all([refreshFiles(), refreshDirectories()])
+      setMessage(`已打开 ${basename(request.document.path)}`)
+    } catch (error) {
+      setMessage(`打开文件失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [refreshDirectories, refreshFiles])
 
   const saveTab = useCallback(async (path: string, silent = false) => {
     const tab = tabs.find((candidate) => candidate.path === path)
@@ -258,6 +285,14 @@ export default function App() {
       setHistoryBusy(false)
     }
   }
+
+  useEffect(() => {
+    const unsubscribe = window.markdownDesktop.onOpenFileRequested(() => {
+      void consumeOpenFileRequest()
+    })
+    void consumeOpenFileRequest()
+    return unsubscribe
+  }, [consumeOpenFileRequest])
 
   useEffect(() => {
     void window.markdownDesktop.getWorkspace().then(async (current) => {

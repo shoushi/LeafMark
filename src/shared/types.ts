@@ -190,6 +190,11 @@ export interface RenameOptions {
   newName: string
 }
 
+export interface OpenFileRequest {
+  workspace: WorkspaceInfo
+  document: MarkdownDocument
+}
+
 export interface MarkdownDesktopAPI {
   /** Open the native directory picker and make the chosen directory active. */
   selectWorkspace(): Promise<WorkspaceInfo | null>
@@ -221,6 +226,10 @@ export interface MarkdownDesktopAPI {
   removeRecentWorkspace(path: string): Promise<void>
   onFileChanged(listener: (event: FileChangeEvent) => void): () => void
   openExternal(url: string): Promise<void>
+  /** Consume a Markdown file passed by the operating system, if one is pending. */
+  consumeOpenFileRequest(): Promise<OpenFileRequest | null>
+  /** Listen for a new operating-system file-open request while the app is running. */
+  onOpenFileRequested(listener: () => void): () => void
 }
 
 declare global {

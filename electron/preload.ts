@@ -7,6 +7,7 @@ import type {
   FileChangeEvent,
   HistorySnapshot,
   MarkdownDesktopAPI,
+  OpenFileRequest,
   MergeFileResult,
   RenameOptions,
   SaveAttachmentOptions,
@@ -43,6 +44,8 @@ const CHANNELS = {
   updateDownload: 'update:download',
   updateInstall: 'update:install',
   fileChanged: 'workspace:file-changed',
+  openFileRequested: 'file:open-requested',
+  consumeOpenFileRequest: 'file:consume-open-request',
 } as const
 
 const api: MarkdownDesktopAPI = {
@@ -81,6 +84,12 @@ const api: MarkdownDesktopAPI = {
     return () => ipcRenderer.removeListener(CHANNELS.fileChanged, handler)
   },
   openExternal: (url) => ipcRenderer.invoke(CHANNELS.openExternal, url),
+  consumeOpenFileRequest: (): Promise<OpenFileRequest | null> => ipcRenderer.invoke(CHANNELS.consumeOpenFileRequest),
+  onOpenFileRequested: (listener: () => void) => {
+    const handler = () => listener()
+    ipcRenderer.on(CHANNELS.openFileRequested, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.openFileRequested, handler)
+  },
 }
 
 contextBridge.exposeInMainWorld('markdownDesktop', api)
